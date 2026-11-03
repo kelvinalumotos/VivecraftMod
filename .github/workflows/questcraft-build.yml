@@ -32,4 +32,5 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: vivecraft-questcraft-fabric
-          path: fabric/build/libs/*.jar
+          # the remapped mod jar goes to the root build/libs
+          path: build/libs/*.jar
