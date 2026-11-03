@@ -12,7 +12,4 @@ public interface GlDeviceExtension {
     GpuTexture vivecraft$createFixedIdTexture(
         @Nullable String label, int usageFlags, TextureFormat textureFormat, int width,
         int height, int depthLayers, int mipmapLevels, int texId);
-    GpuTexture vivecraft$precreatedFixedIdTexture(
-        @Nullable Supplier<String> labelSup, int usageFlags, TextureFormat textureFormat, int width,
-        int height, int depthLayers, int mipmapLevels, int texId);
 }
