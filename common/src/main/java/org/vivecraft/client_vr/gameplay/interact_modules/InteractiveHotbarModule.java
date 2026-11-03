@@ -185,6 +185,7 @@ public class InteractiveHotbarModule implements DebugRenderModule, InteractModul
 
     @Override
     public void renderDebug(boolean isActive) {
+        /*
         if (this.dh.vrSettings.seated) return;
         if (this.mc.screen != null || !this.dh.vrSettings.vrTouchHotbar) return;
         if (this.dh.vrSettings.vrHudLockMode == VRSettings.HUDLock.HEAD || !GuiHandler.HUD_POPUP) return;
@@ -224,5 +225,6 @@ public class InteractiveHotbarModule implements DebugRenderModule, InteractModul
             DebugRenderHelper.renderCylinder(slotPos.add(line.x * 0.5F, line.y * 0.5F, line.z * 0.5F), line, size,
                 this.hotbar == 9 ? MathUtils.GREEN_INT : MathUtils.RED_INT);
         }
+         */
     }
 }

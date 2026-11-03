@@ -742,6 +742,7 @@ public class SwingTracker implements ItemInUseTracker, DebugRenderTracker {
 
     @Override
     public void renderDebug() {
+        /*
         int trackers = 2;
 
         if (this.dh.vrSettings.feetCollision && this.dh.vrPlayer.vrdata_world_pre.fbtMode != FBTMode.ARMS_ONLY) {
@@ -815,5 +816,6 @@ public class SwingTracker implements ItemInUseTracker, DebugRenderTracker {
                     (float) entity.getBoundingBox().getSize() / 2F, MathUtils.GREEN_INT);
             }
         }
+         */
     }
 }

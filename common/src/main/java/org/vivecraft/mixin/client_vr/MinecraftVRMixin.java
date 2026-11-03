@@ -75,7 +75,7 @@ import org.vivecraft.client_vr.gameplay.KeybindHandler;
 import org.vivecraft.client_vr.gameplay.screenhandlers.GuiHandler;
 import org.vivecraft.client_vr.gameplay.trackers.TelescopeTracker;
 import org.vivecraft.client_vr.provider.MCVR;
-import org.vivecraft.client_vr.provider.openvr_lwjgl.VRInputAction;
+import org.vivecraft.client_vr.provider.control.VRInputAction;
 import org.vivecraft.client_vr.render.MirrorNotification;
 import org.vivecraft.client_vr.render.RenderConfigException;
 import org.vivecraft.client_vr.render.VRFirstPersonArmSwing;
@@ -210,6 +210,10 @@ public abstract class MinecraftVRMixin implements MinecraftExtension {
         if (!VRState.VR_INITIALIZED) {
             return;
         }
+
+        // handle vr events, regardless of VR active state
+        ClientDataHolderVR.getInstance().vr.handleEvents();
+
         boolean vrActive = !ClientDataHolderVR.getInstance().vrSettings.vrHotswitchingEnabled ||
             ClientDataHolderVR.getInstance().vr.isActive();
         if (VRState.VR_RUNNING != vrActive && (ClientNetworking.SERVER_ALLOWS_VR_SWITCHING || this.player == null)) {
@@ -225,8 +229,9 @@ public abstract class MinecraftVRMixin implements MinecraftExtension {
             {
                 this.gameRenderer.getMainCamera().update(this.deltaTracker);
             }
-            // do the intended polling
-            this.vivecraft$poll();
+            // QuestCraft: no polling here. vivecraft$backupPoll does it at the start of renderFrame,
+            // after the game tick, so OpenXR's xrWaitFrame is not separated from rendering by the tick
+            // (the "frametiming" fix from QuestCraft's OpenXR-1.21.10)
         }
     }
 
@@ -310,7 +315,7 @@ public abstract class MinecraftVRMixin implements MinecraftExtension {
             try {
                 Profiler.get().push("setupRenderConfiguration");
                 GraphicsHelper.INSTANCE.checkError("pre render setup");
-                ClientDataHolderVR.getInstance().vrRenderer.setupRenderConfiguration();
+                ClientDataHolderVR.getInstance().vrRenderer.setupRenderConfiguration(true);
                 GraphicsHelper.INSTANCE.checkError("post render setup");
             } catch (Exception e) {
                 // something went wrong, disable VR

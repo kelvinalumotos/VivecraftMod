@@ -31,8 +31,9 @@ import org.vivecraft.client_vr.extensions.WindowExtension;
 import org.vivecraft.client_vr.gameplay.screenhandlers.GuiHandler;
 import org.vivecraft.client_vr.gameplay.screenhandlers.KeyboardHandler;
 import org.vivecraft.client_vr.gameplay.screenhandlers.RadialHandler;
-import org.vivecraft.client_vr.provider.openvr_lwjgl.VRInputAction;
-import org.vivecraft.client_vr.provider.openvr_lwjgl.control.VRInputActionSet;
+import org.vivecraft.client_vr.gameplay.trackers.ClimbTracker;
+import org.vivecraft.client_vr.provider.control.VRInputAction;
+import org.vivecraft.client_vr.provider.control.VRInputActionSet;
 import org.vivecraft.client_vr.render.RenderConfigException;
 import org.vivecraft.client_vr.settings.AutoCalibration;
 import org.vivecraft.client_vr.settings.VRHotkeys;
@@ -1533,4 +1534,8 @@ public abstract class MCVR {
      * @return the name of the VR runtime
      */
     public abstract String getRuntimeName();
+
+    public abstract void handleEvents();
+
+    public abstract ControllerType getOriginControllerType(long lastOrigin);
 }

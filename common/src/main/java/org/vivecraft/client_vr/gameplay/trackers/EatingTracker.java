@@ -144,6 +144,7 @@ public class EatingTracker implements ItemInUseTracker, DebugRenderTracker {
 
     @Override
     public void renderDebug() {
+        /*
         VRData world = this.dh.vrPlayer.getVRDataWorld();
         for (int c = 0; c < 2; c++) {
             if (this.foodPos[c] != null) {
@@ -156,5 +157,6 @@ public class EatingTracker implements ItemInUseTracker, DebugRenderTracker {
                     this.eating[c] ? MathUtils.GREEN_INT : MathUtils.RED_INT);
             }
         }
+         */
     }
 }

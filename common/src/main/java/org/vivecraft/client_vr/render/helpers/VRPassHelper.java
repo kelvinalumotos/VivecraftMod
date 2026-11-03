@@ -236,19 +236,23 @@ public class VRPassHelper {
             }
 
             DATA_HOLDER.isFirstPass = false;
+
+            // Submit the frame immediately after eyes are done
+            if(renderpass == RenderPass.RIGHT) {
+                Profiler.get().push("Display/Reproject");
+
+                try {
+                    DATA_HOLDER.vrRenderer.endFrame();
+                } catch (RenderConfigException exception) {
+                    VRSettings.LOGGER.error("Vivecraft: error ending frame: {}", exception.error.getString());
+                }
+                Profiler.get().pop();
+                GraphicsHelper.INSTANCE.checkError("post submit");
+            }
         }
+        DATA_HOLDER.vrPlayer.postRender(deltaTracker.getGameTimeDeltaPartialTick(true));
+
         // now we are done with rendering
         Profiler.get().pop();
-
-        DATA_HOLDER.vrPlayer.postRender(deltaTracker.getGameTimeDeltaPartialTick(true));
-        Profiler.get().push("Display/Reproject");
-
-        try {
-            DATA_HOLDER.vrRenderer.endFrame();
-        } catch (RenderConfigException exception) {
-            VRSettings.LOGGER.error("Vivecraft: error ending frame: {}", exception.error.getString());
-        }
-        Profiler.get().pop();
-        GraphicsHelper.INSTANCE.checkError("post submit");
     }
 }

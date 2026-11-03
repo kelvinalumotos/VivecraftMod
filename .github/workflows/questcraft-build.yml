@@ -1,0 +1,35 @@
+name: QuestCraft build
+
+# Builds the Fabric jar of the QuestCraft OpenXR port. QuestCraft only ships Fabric, so Forge and
+# NeoForge are left out through local.properties (read by settings.gradle).
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "questcraft/**"
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "25"
+
+      - name: Only build Fabric
+        run: |
+          echo "project.build.excludeForge=true" >> local.properties
+          echo "project.build.excludeNeoforge=true" >> local.properties
+
+      - name: Build
+        run: |
+          chmod +x gradlew
+          ./gradlew :fabric:build --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vivecraft-questcraft-fabric
+          path: fabric/build/libs/*.jar

@@ -573,7 +573,7 @@ public abstract class VRRenderer {
      * @throws RenderConfigException in case something failed to initialize or the gpu vendor is unsupported
      * @throws IOException           can be thrown by the WorldRenderPass init when trying to load the shaders
      */
-    public void setupRenderConfiguration() throws RenderConfigException, IOException {
+    public void setupRenderConfiguration(boolean render) throws RenderConfigException, IOException {
         Minecraft minecraft = Minecraft.getInstance();
         ClientDataHolderVR dataholder = ClientDataHolderVR.getInstance();
 
@@ -966,6 +966,21 @@ public abstract class VRRenderer {
 
             throw new RenderConfigException(Component.translatable("vivecraft.messages.incompatiblegpu"), message);
         }
+    }
+
+    /**
+     * QuestCraft: the target the left eye renders into this frame.
+     * OpenXR swaps framebufferEye to the current swapchain image every frame.
+     */
+    public RenderTarget getLeftEyeTarget() {
+        return this.framebufferEye[0];
+    }
+
+    /**
+     * QuestCraft: the target the right eye renders into this frame.
+     */
+    public RenderTarget getRightEyeTarget() {
+        return this.framebufferEye[1];
     }
 
     /**

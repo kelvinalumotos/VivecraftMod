@@ -14,7 +14,7 @@ import org.vivecraft.client_vr.ClientDataHolderVR;
 import org.vivecraft.client_vr.MethodHolder;
 import org.vivecraft.client_vr.gameplay.screenhandlers.GuiHandler;
 import org.vivecraft.client_vr.provider.*;
-import org.vivecraft.client_vr.provider.openvr_lwjgl.VRInputAction;
+import org.vivecraft.client_vr.provider.control.VRInputAction;
 import org.vivecraft.client_vr.render.MirrorNotification;
 import org.vivecraft.client_vr.settings.VRSettings;
 import org.vivecraft.common.utils.MathUtils;
@@ -208,6 +208,11 @@ public class NullVR extends MCVR {
     }
 
     @Override
+    public void handleEvents() {
+
+    }
+
+    @Override
     public void refreshControllerTransforms() {}
 
     @Override
@@ -275,6 +280,11 @@ public class NullVR extends MCVR {
     @Override
     public boolean isActive() {
         return this.vrActive;
+    }
+
+    @Override
+    public ControllerType getOriginControllerType(long inputValueHandle) {
+        return null;
     }
 
     @Override
