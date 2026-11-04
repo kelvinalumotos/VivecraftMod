@@ -6,6 +6,7 @@ import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.TextureFormat;
 import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL11C;
 import org.lwjgl.opengl.GL13C;
 import org.lwjgl.opengl.GL30C;
 import org.lwjgl.system.FunctionProvider;
@@ -97,6 +98,26 @@ public class GlDeviceMixin implements GlDeviceExtension {
         cir.setReturnValue(texture);
     }
 
+    /** whether the texture bound to GL_TEXTURE_2D already has immutable storage */
+    @Unique
+    private static boolean vivecraft$isImmutable(String label) {
+        int earlier = GlStateManager._getError();
+        if (earlier != 0) {
+            VRSettings.LOGGER.warn("QuestCraft: OpenGL error {} setting up '{}' before the storage check", earlier, label);
+        }
+        // GL_TEXTURE_IMMUTABLE_FORMAT, core in OpenGL 4.2 and OpenGL ES 3.0
+        int immutable = GL11C.glGetTexParameteri(GL30C.GL_TEXTURE_2D, 0x912F);
+        int error = GlStateManager._getError();
+        if (error != 0) {
+            VRSettings.LOGGER.warn("QuestCraft: could not query GL_TEXTURE_IMMUTABLE_FORMAT for '{}' (error {})", label, error);
+            return false;
+        }
+        if (immutable != 0) {
+            VRSettings.LOGGER.info("QuestCraft: '{}' already has immutable storage, using it as is", label);
+        }
+        return immutable != 0;
+    }
+
     @Unique
     private static long vivecraft$texStorage2D = -1L;
 
@@ -186,9 +207,14 @@ public class GlDeviceMixin implements GlDeviceExtension {
                 GlStateManager._texParameter(GL30C.GL_TEXTURE_2D, GL30C.GL_TEXTURE_COMPARE_MODE, GL30C.GL_NONE);
             }
 
-            for (int m = 0; m < mipmapLevels; m++) {
-                GlStateManager._texImage2D(GL30C.GL_TEXTURE_2D, m, GlConst.toGlInternalId(textureFormat), width >> m,
-                    height >> m, 0, GlConst.toGlExternalId(textureFormat), GlConst.toGlType(textureFormat), null);
+            // QuestCraft: OpenXR swapchain images come from the runtime with immutable storage
+            // (glTexStorage2D). Re-allocating them with glTexImage2D is GL_INVALID_OPERATION on OpenGL ES,
+            // so only allocate textures that do not have storage yet.
+            if (!vivecraft$isImmutable(label)) {
+                for (int m = 0; m < mipmapLevels; m++) {
+                    GlStateManager._texImage2D(GL30C.GL_TEXTURE_2D, m, GlConst.toGlInternalId(textureFormat), width >> m,
+                        height >> m, 0, GlConst.toGlExternalId(textureFormat), GlConst.toGlType(textureFormat), null);
+                }
             }
 
             int error = GlStateManager._getError();
