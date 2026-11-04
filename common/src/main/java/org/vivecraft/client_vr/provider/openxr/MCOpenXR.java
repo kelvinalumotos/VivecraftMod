@@ -235,6 +235,13 @@ public class MCOpenXR extends MCVR {
             // Eye positions
             OpenXRUtil.openXRPoseToMarix(this.viewBuffer.get(0).pose(), this.hmdPoseLeftEye);
             OpenXRUtil.openXRPoseToMarix(this.viewBuffer.get(1).pose(), this.hmdPoseRightEye);
+            // QuestCraft: the views are located in xrAppSpace (the projection layer needs them there), but
+            // MCVR treats hmdPoseLeft/RightEye as offsets from the HMD and multiplies them with hmdPose.
+            // Using the room-space poses applied the head rotation twice, so the world swam with head
+            // movement. Turn them into head-relative poses: inverse(hmdPose) * eyePose.
+            Matrix4f roomToHmd = new Matrix4f(this.hmdPose).invertAffine();
+            roomToHmd.mul(this.hmdPoseLeftEye, this.hmdPoseLeftEye);
+            roomToHmd.mul(this.hmdPoseRightEye, this.hmdPoseRightEye);
 
             if (this.inputInitialized) {
                 Profiler.get().push("updateActionState");
