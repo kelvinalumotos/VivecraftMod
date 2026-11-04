@@ -24,11 +24,15 @@ public abstract class ResourceLoadStateTrackerMixin {
     @Unique
     private boolean vivecraft$canceledMenuWorldBuilding = false;
 
+    // QuestCraft: set after the first reload that finishes. If the initial reload fails, Minecraft
+    // recovers with another reload whose reason is not INITIAL, and VR would never be switched on.
+    @Unique
+    private static boolean vivecraft$firstReloadDone = false;
+
     @Inject(method = "finishReload", at = @At("TAIL"))
     private void vivecraft$initializeVR(CallbackInfo ci) {
-        if (this.reloadState != null &&
-            this.reloadState.reloadReason == ResourceLoadStateTracker.ReloadReason.INITIAL)
-        {
+        if (this.reloadState != null && !vivecraft$firstReloadDone) {
+            vivecraft$firstReloadDone = true;
             // init vr after first resource loading
             if (ClientDataHolderVR.getInstance().vrSettings.vrEnabled &&
                 ClientDataHolderVR.getInstance().vrSettings.rememberVr)
