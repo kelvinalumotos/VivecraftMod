@@ -1,5 +1,6 @@
 package org.vivecraft.client_vr.provider.openxr;
 
+import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.util.Mth;
@@ -10,6 +11,7 @@ import org.joml.Matrix4fc;
 import org.joml.Vector2f;
 import org.joml.Vector3f;
 import org.lwjgl.PointerBuffer;
+import org.lwjgl.glfw.GLFW;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL21;
 import org.lwjgl.opengl.GL30;
@@ -21,11 +23,14 @@ import org.vivecraft.api.client.data.RenderPass;
 import org.vivecraft.client.VivecraftVRMod;
 import org.vivecraft.client_vr.ClientDataHolderVR;
 import org.vivecraft.client_vr.VRState;
+import org.vivecraft.client_vr.gameplay.screenhandlers.GuiHandler;
 import org.vivecraft.client_vr.gameplay.screenhandlers.KeyboardHandler;
 import org.vivecraft.client_vr.gameplay.screenhandlers.RadialHandler;
 import org.vivecraft.client_vr.provider.ControllerType;
 import org.vivecraft.client_vr.provider.MCVR;
+import org.vivecraft.client_vr.provider.InputSimulator;
 import org.vivecraft.client_vr.provider.VRRenderer;
+import org.vivecraft.client_vr.provider.control.TrackpadSwipeSampler;
 import org.vivecraft.client_vr.provider.control.VRInputAction;
 import org.vivecraft.client_vr.provider.control.VRInputActionSet;
 import org.vivecraft.client_vr.settings.VRSettings;
@@ -77,11 +82,27 @@ public class MCOpenXR extends MCVR {
     private boolean inputInitialized;
     protected static final DeviceCompat device = DeviceCompat.detectDevice();
 
+    // QuestCraft: input processing state, same as MCOpenVR
+    private final Map<VRInputActionSet, Set<VRInputAction>> unpressedSetKeys = new EnumMap<>(VRInputActionSet.class);
+    private List<VRInputActionSet> activeInputSets = new ArrayList<>();
+    private final Map<String, TrackpadSwipeSampler> trackpadSwipeSamplers = new HashMap<>();
+
+    // QuestCraft: recentering. xrAppSpace is the STAGE space (floor height from the guardian), turned and
+    // moved to where LOCAL space is, so "forward" follows the headset's recenter (holding the Meta button)
+    private XrSpace xrStageSpace;
+    private XrSpace xrLocalSpace;
+    private boolean recenterPending = true;
+    private long recenterTime = 0L;
+    private long guiResetAt = 0L;
+
     public MCOpenXR(Minecraft mc, ClientDataHolderVR dh) {
         super(mc, dh, VivecraftVRMod.INSTANCE);
         OME = this;
         this.hapticScheduler = new OpenXRHapticScheduler();
         GL11.glDisable(GL_FRAMEBUFFER_SRGB);
+        for (VRInputActionSet set : VRInputActionSet.values()) {
+            this.unpressedSetKeys.put(set, new HashSet<>());
+        }
     }
 
     @Override
@@ -89,9 +110,143 @@ public class MCOpenXR extends MCVR {
         return "OpenXR";
     }
 
+    /**
+     * QuestCraft: this was empty, so no controller button reached Minecraft. Vivecraft used to process inputs
+     * in MCVR for every provider; since 1.21.9 that lives in MCOpenVR, and the OpenXR provider was left with
+     * an empty override. This is MCOpenVR's processing, with OpenVR's invalid handle (0) spelled as 0L.
+     */
     @Override
     public void processInputs() {
+        if (this.dh.vrSettings.seated || this.dh.viewOnly || !this.inputInitialized) {
+            this.ignorePressesNextFrame = false;
+            return;
+        }
 
+        for (VRInputAction action : this.inputActions.values()) {
+            if (action.isHanded()) {
+                for (ControllerType controllertype : ControllerType.values()) {
+                    action.setCurrentHand(controllertype);
+                    this.processInputAction(action);
+                }
+            } else {
+                this.processInputAction(action);
+            }
+        }
+
+        this.processScrollInput(GuiHandler.KEY_SCROLL_AXIS,
+            () -> InputSimulator.scrollMouse(0.0D, 1.0D),
+            () -> InputSimulator.scrollMouse(0.0D, -1.0D));
+        this.processScrollInput(VivecraftVRMod.INSTANCE.keyHotbarScroll,
+            () -> this.changeHotbar(-1),
+            () -> this.changeHotbar(1));
+        this.processSwipeInput(VivecraftVRMod.INSTANCE.keyHotbarSwipeX,
+            () -> this.changeHotbar(1),
+            () -> this.changeHotbar(-1), null, null);
+        this.processSwipeInput(VivecraftVRMod.INSTANCE.keyHotbarSwipeY, null, null,
+            () -> this.changeHotbar(-1),
+            () -> this.changeHotbar(1));
+        this.ignorePressesNextFrame = false;
+    }
+
+    private void processInputAction(VRInputAction action) {
+        if (action.isActive() && action.isEnabledRaw() &&
+            // try to prevent double left clicks
+            (!ClientDataHolderVR.getInstance().vrSettings.ingameBindingsInGui ||
+                !(action.actionSet == VRInputActionSet.INGAME &&
+                    action.keyBinding.key == InputConstants.Type.MOUSE.getOrCreate(GLFW.GLFW_MOUSE_BUTTON_LEFT) &&
+                    this.mc.screen != null
+                )
+            ))
+        {
+            if (action.isButtonChanged()) {
+                if (action.isButtonPressed() && action.isEnabled()) {
+                    // so that closing a GUI with a click does not also click in the world right after
+                    if (!this.ignorePressesNextFrame || this.canActionBeRepressed(action)) {
+                        this.pressAction(action);
+                    }
+                } else {
+                    this.unpressAction(action);
+                }
+            } else if (action.isButtonPressed() && action.isEnabled() && !action.keyBinding.isDown() &&
+                this.canActionBeRepressed(action))
+            {
+                // allow repressing ingame buttons that were held before
+                this.pressAction(action);
+            }
+        } else if (this.checkIfNotMovement(action)) {
+            this.unpressAction(action);
+        }
+    }
+
+    private boolean canActionBeRepressed(VRInputAction action) {
+        return action.actionSet == VRInputActionSet.INGAME &&
+            this.unpressedSetKeys.get(action.actionSet).contains(action);
+    }
+
+    private void pressAction(VRInputAction action) {
+        action.pressBinding();
+        this.unpressedSetKeys.get(action.actionSet).remove(action);
+    }
+
+    private void unpressAction(VRInputAction action) {
+        if (!this.activeInputSets.contains(action.actionSet) && action.isButtonChanged()) {
+            this.unpressedSetKeys.get(action.actionSet).add(action);
+        }
+        action.unpressBinding();
+    }
+
+    private boolean checkIfNotMovement(VRInputAction action) {
+        return action.keyBinding != this.mc.options.keyLeft &&
+            action.keyBinding != this.mc.options.keyRight &&
+            action.keyBinding != this.mc.options.keyUp &&
+            action.keyBinding != this.mc.options.keyDown || !this.isMovement;
+    }
+
+    private void processScrollInput(KeyMapping keyMapping, Runnable upCallback, Runnable downCallback) {
+        VRInputAction action = this.getInputAction(keyMapping);
+
+        if (action.isEnabled() && action.getLastOrigin() != 0L) {
+            float value = action.getAxis2D(false).y();
+            if (value > 0.0F) {
+                upCallback.run();
+            } else if (value < 0.0F) {
+                downCallback.run();
+            }
+        }
+    }
+
+    private void processSwipeInput(
+        KeyMapping keyMapping, Runnable leftCallback, Runnable rightCallback, Runnable upCallback,
+        Runnable downCallback)
+    {
+        VRInputAction action = this.getInputAction(keyMapping);
+
+        if (action.isEnabled() && action.getLastOrigin() != 0L) {
+            ControllerType controller = this.findActiveBindingControllerType(keyMapping);
+
+            if (controller != null) {
+                TrackpadSwipeSampler sampler = this.trackpadSwipeSamplers.computeIfAbsent(keyMapping.getName(),
+                    name -> new TrackpadSwipeSampler());
+                sampler.update(controller, action.getAxis2D(false));
+
+                if (sampler.isSwipedUp() && upCallback != null) {
+                    this.triggerHapticPulse(controller, 0.001F, 400.0F, 0.5F);
+                    upCallback.run();
+                }
+                if (sampler.isSwipedDown() && downCallback != null) {
+                    this.triggerHapticPulse(controller, 0.001F, 400.0F, 0.5F);
+                    downCallback.run();
+                }
+                if (sampler.isSwipedLeft() && leftCallback != null) {
+                    this.triggerHapticPulse(controller, 0.001F, 400.0F, 0.5F);
+                    leftCallback.run();
+                }
+                if (sampler.isSwipedRight() && rightCallback != null) {
+                    this.triggerHapticPulse(controller, 0.001F, 400.0F, 0.5F);
+                    rightCallback.run();
+                }
+            }
+        }
     }
 
     @Override
@@ -116,6 +271,14 @@ public class MCOpenXR extends MCVR {
         if (this.xrViewSpace != null) {
             error = XR10.xrDestroySpace(this.xrViewSpace);
             logError(error, "xrDestroySpace", "xrViewSpace");
+        }
+        if (this.xrStageSpace != null) {
+            error = XR10.xrDestroySpace(this.xrStageSpace);
+            logError(error, "xrDestroySpace", "xrStageSpace");
+        }
+        if (this.xrLocalSpace != null) {
+            error = XR10.xrDestroySpace(this.xrLocalSpace);
+            logError(error, "xrDestroySpace", "xrLocalSpace");
         }
         if (this.session != null) {
             error = XR10.xrDestroySession(this.session);
@@ -197,6 +360,17 @@ public class MCOpenXR extends MCVR {
 
             this.time = frameState.predictedDisplayTime();
             this.shouldRender = frameState.shouldRender();
+
+            // QuestCraft: swap the app space before anything of this frame is located in it
+            if (this.recenterPending && this.time >= this.recenterTime) {
+                this.recenterAppSpace();
+            }
+            if (this.guiResetAt != 0L && System.nanoTime() >= this.guiResetAt) {
+                this.guiResetAt = 0L;
+                if (this.mc.screen != null) {
+                    GuiHandler.onScreenChanged(null, this.mc.screen, false);
+                }
+            }
 
             error = XR10.xrBeginFrame(
                 this.session,
@@ -487,6 +661,13 @@ public class MCOpenXR extends MCVR {
                 .set(new XrActionSet(this.getActionSetHandle(vrinputactionset), this.instance), NULL);
         }
 
+        // clear any sets that got deactivated (same as MCOpenVR)
+        this.activeInputSets.removeAll(arraylist);
+        for (VRInputActionSet set : this.activeInputSets) {
+            this.unpressedSetKeys.get(set).clear();
+        }
+        this.activeInputSets = arraylist;
+
         return !arraylist.isEmpty();
     }
 
@@ -516,6 +697,13 @@ public class MCOpenXR extends MCVR {
                 case XR10.XR_TYPE_EVENT_DATA_INTERACTION_PROFILE_CHANGED -> {
                 }
                 case XR10.XR_TYPE_EVENT_DATA_REFERENCE_SPACE_CHANGE_PENDING -> {
+                    // QuestCraft: the user recentered (held the Meta button). Follow it once it takes effect.
+                    XrEventDataReferenceSpaceChangePending change =
+                        XrEventDataReferenceSpaceChangePending.create(event.address());
+                    VRSettings.LOGGER.info("QuestCraft: reference space {} changed (recenter)",
+                        change.referenceSpaceType());
+                    this.recenterPending = true;
+                    this.recenterTime = change.changeTime();
                 }
                 default -> {
                 }
@@ -803,6 +991,75 @@ public class MCOpenXR extends MCVR {
             error = XR10.xrCreateReferenceSpace(this.session, referenceSpaceCreateInfo, pp);
             logError(error, "xrCreateReferenceSpace", "XR_REFERENCE_SPACE_TYPE_VIEW");
             this.xrViewSpace = new XrSpace(pp.get(0), this.session);
+
+            // QuestCraft: plain STAGE and LOCAL spaces, to measure where the recenter put "forward"
+            referenceSpaceCreateInfo.referenceSpaceType(XR10.XR_REFERENCE_SPACE_TYPE_STAGE);
+            error = XR10.xrCreateReferenceSpace(this.session, referenceSpaceCreateInfo, pp);
+            logError(error, "xrCreateReferenceSpace", "XR_REFERENCE_SPACE_TYPE_STAGE (recenter)");
+            if (error >= 0) {
+                this.xrStageSpace = new XrSpace(pp.get(0), this.session);
+            }
+            referenceSpaceCreateInfo.referenceSpaceType(XR10.XR_REFERENCE_SPACE_TYPE_LOCAL);
+            error = XR10.xrCreateReferenceSpace(this.session, referenceSpaceCreateInfo, pp);
+            logError(error, "xrCreateReferenceSpace", "XR_REFERENCE_SPACE_TYPE_LOCAL (recenter)");
+            if (error >= 0) {
+                this.xrLocalSpace = new XrSpace(pp.get(0), this.session);
+            }
+        }
+    }
+
+    /**
+     * QuestCraft: makes xrAppSpace a STAGE space turned and moved to LOCAL space's yaw and floor position.
+     * LOCAL is where the headset was when the app started, or the last recenter, so the menu (which sits at
+     * a fixed spot in front of the room origin) ends up in front of the user. Retried every frame until the
+     * runtime can locate LOCAL.
+     */
+    private void recenterAppSpace() {
+        if (this.xrStageSpace == null || this.xrLocalSpace == null) {
+            this.recenterPending = false;
+            return;
+        }
+        try (MemoryStack stack = MemoryStack.stackPush()) {
+            XrSpaceLocation location = XrSpaceLocation.calloc(stack).type(XR10.XR_TYPE_SPACE_LOCATION);
+            int error = XR10.xrLocateSpace(this.xrLocalSpace, this.xrStageSpace, this.time, location);
+            long valid = XR10.XR_SPACE_LOCATION_POSITION_VALID_BIT | XR10.XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+            if (error < 0 || (location.locationFlags() & valid) != valid) {
+                return;
+            }
+
+            XrQuaternionf q = location.pose().orientation();
+            Vector3f forward = new org.joml.Quaternionf(q.x(), q.y(), q.z(), q.w())
+                .transform(new Vector3f(0.0F, 0.0F, -1.0F));
+            // rotationY(yaw) turns -Z into (-sin(yaw), 0, -cos(yaw))
+            float yaw = (float) Math.atan2(-forward.x, -forward.z);
+            XrVector3f position = location.pose().position$();
+
+            XrPosef pose = XrPosef.calloc(stack);
+            pose.orientation().set(0.0F, (float) Math.sin(yaw * 0.5F), 0.0F, (float) Math.cos(yaw * 0.5F));
+            pose.position$().set(position.x(), 0.0F, position.z());
+
+            XrReferenceSpaceCreateInfo createInfo = XrReferenceSpaceCreateInfo.calloc(stack)
+                .type(XR10.XR_TYPE_REFERENCE_SPACE_CREATE_INFO)
+                .referenceSpaceType(XR10.XR_REFERENCE_SPACE_TYPE_STAGE)
+                .poseInReferenceSpace(pose);
+            PointerBuffer pp = stack.callocPointer(1);
+            error = XR10.xrCreateReferenceSpace(this.session, createInfo, pp);
+            logError(error, "xrCreateReferenceSpace", "recentered STAGE");
+            if (error < 0) {
+                this.recenterPending = false;
+                return;
+            }
+
+            XrSpace old = this.xrAppSpace;
+            this.xrAppSpace = new XrSpace(pp.get(0), this.session);
+            if (old != null) {
+                logError(XR10.xrDestroySpace(old), "xrDestroySpace", "old xrAppSpace");
+            }
+            this.recenterPending = false;
+            // re-place open screens in front of the head once the new poses have reached the game
+            this.guiResetAt = System.nanoTime() + 300_000_000L;
+            VRSettings.LOGGER.info("QuestCraft: recentered, yaw {} deg, offset {} {}",
+                Math.round(Math.toDegrees(yaw)), position.x(), position.z());
         }
     }
 
