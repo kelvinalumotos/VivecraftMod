@@ -4,9 +4,11 @@ import com.mojang.blaze3d.GpuOutOfMemoryException;
 import com.mojang.blaze3d.opengl.*;
 import com.mojang.blaze3d.textures.GpuTexture;
 import com.mojang.blaze3d.textures.TextureFormat;
+import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL13C;
 import org.lwjgl.opengl.GL30C;
+import org.lwjgl.opengl.GL42C;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -58,12 +60,32 @@ public class GlDeviceMixin implements GlDeviceExtension {
             GlStateManager._texParameter(GL13C.GL_TEXTURE_CUBE_MAP, GL30C.GL_TEXTURE_COMPARE_MODE, GL30C.GL_NONE);
             vivecraft$checkCubeMap("glTexParameteri(GL_TEXTURE_COMPARE_MODE)", label, width, height, false);
         }
-        for (int face = 0; face < 6; face++) {
-            for (int level = 0; level < mipLevels; level++) {
-                GlStateManager._texImage2D(GL13C.GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, level,
-                    GlConst.toGlInternalId(format), width >> level, height >> level, 0,
-                    GlConst.toGlExternalId(format), GlConst.toGlType(format), null);
-                vivecraft$checkCubeMap("glTexImage2D(face " + face + ", level " + level + ")", label, width, height, true);
+        // LTW wraps glTexImage2D and rejects the cube map face targets with GL_INVALID_ENUM, but it does not
+        // wrap glTexStorage2D, which allocates all faces at once and is core in OpenGL ES 3.0
+        boolean allocated = false;
+        try {
+            if (GL.getCapabilities().glTexStorage2D != 0L) {
+                GL42C.glTexStorage2D(GL13C.GL_TEXTURE_CUBE_MAP, mipLevels, GlConst.toGlInternalId(format), width, height);
+                int error = GlStateManager._getError();
+                if (error == 0) {
+                    allocated = true;
+                } else {
+                    VRSettings.LOGGER.warn("QuestCraft: OpenGL error {} in glTexStorage2D while creating cube map '{}', falling back to glTexImage2D", error, label);
+                }
+            } else {
+                VRSettings.LOGGER.warn("QuestCraft: glTexStorage2D not available, creating cube map '{}' with glTexImage2D", label);
+            }
+        } catch (Throwable t) {
+            VRSettings.LOGGER.warn("QuestCraft: glTexStorage2D failed for cube map '{}', falling back to glTexImage2D", label, t);
+        }
+        if (!allocated) {
+            for (int face = 0; face < 6; face++) {
+                for (int level = 0; level < mipLevels; level++) {
+                    GlStateManager._texImage2D(GL13C.GL_TEXTURE_CUBE_MAP_POSITIVE_X + face, level,
+                        GlConst.toGlInternalId(format), width >> level, height >> level, 0,
+                        GlConst.toGlExternalId(format), GlConst.toGlType(format), null);
+                    vivecraft$checkCubeMap("glTexImage2D(face " + face + ", level " + level + ")", label, width, height, true);
+                }
             }
         }
 
