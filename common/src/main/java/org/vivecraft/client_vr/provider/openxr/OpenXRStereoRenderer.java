@@ -95,7 +95,8 @@ public class OpenXRStereoRenderer extends VRRenderer {
     public void setupRenderConfiguration(boolean render) throws IOException, RenderConfigException {
         super.setupRenderConfiguration(render);
 
-        if(!render) return;
+        // QuestCraft: no swapchain images while the session is stopped, the eyes keep the last ones
+        if(!render || !this.openxr.frameActive) return;
 
         this.projectionLayerViews = XrCompositionLayerProjectionView.calloc(2);
         try (MemoryStack stack = MemoryStack.stackPush()) {
@@ -154,6 +155,10 @@ public class OpenXRStereoRenderer extends VRRenderer {
 
     @Override
     public void endFrame() throws RenderConfigException {
+        // QuestCraft: this frame was not begun (session stopped), so there is nothing to release or submit
+        if (!this.openxr.frameActive) {
+            return;
+        }
         try (MemoryStack stack = MemoryStack.stackPush()) {
             PointerBuffer layers = stack.callocPointer(1);
             int error;

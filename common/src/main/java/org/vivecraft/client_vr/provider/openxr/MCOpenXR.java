@@ -95,6 +95,12 @@ public class MCOpenXR extends MCVR {
     private long recenterTime = 0L;
     private long guiResetAt = 0L;
 
+    // QuestCraft: whether the OpenXR session is running (between xrBeginSession and xrEndSession), and
+    // whether the current frame was begun. While the Meta menu is open the session stops; calling the frame
+    // functions then fails instantly, so the render loop spun at full CPU and logged thousands of errors.
+    private volatile boolean sessionRunning = false;
+    public boolean frameActive = false;
+
     public MCOpenXR(Minecraft mc, ClientDataHolderVR dh) {
         super(mc, dh, VivecraftVRMod.INSTANCE);
         OME = this;
@@ -103,6 +109,7 @@ public class MCOpenXR extends MCVR {
         for (VRInputActionSet set : VRInputActionSet.values()) {
             this.unpressedSetKeys.put(set, new HashSet<>());
         }
+        BinderWatch.start();
     }
 
     @Override
@@ -348,6 +355,20 @@ public class MCOpenXR extends MCVR {
         if (this.mc == null) {
             return;
         }
+
+        if (!this.sessionRunning) {
+            // QuestCraft: no frame while the session is stopped. Keep the game going (ticks, networking)
+            // at about 30 fps without touching OpenXR; poses keep their last values.
+            this.frameActive = false;
+            this.shouldRender = false;
+            try {
+                Thread.sleep(33);
+            } catch (InterruptedException ignored) {
+                Thread.currentThread().interrupt();
+            }
+            return;
+        }
+        this.frameActive = true;
 
         try (MemoryStack stack = MemoryStack.stackPush()) {
             XrFrameState frameState = XrFrameState.calloc(stack).type(XR10.XR_TYPE_FRAME_STATE);
@@ -746,12 +767,14 @@ public class MCOpenXR extends MCVR {
 
                     int error = XR10.xrBeginSession(this.session, sessionBeginInfo);
                     logError(error, "xrBeginSession", "XR_SESSION_STATE_READY");
+                    this.sessionRunning = error >= 0;
                 }
                 this.isActive = true;
                 break;
             }
             case XR10.XR_SESSION_STATE_STOPPING: {
                 this.isActive = false;
+                this.sessionRunning = false;
                 int error = XR10.xrEndSession(this.session);
                 logError(error, "xrEndSession", "XR_SESSION_STATE_STOPPING");
                 break;

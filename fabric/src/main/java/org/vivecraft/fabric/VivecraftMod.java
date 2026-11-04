@@ -32,6 +32,8 @@ public class VivecraftMod implements ModInitializer {
 
         // use channel registers to be compatible with other mod loaders
         if (FabricLoader.getInstance().getEnvironmentType() == EnvType.CLIENT) {
+            // QuestCraft: start watching the binder mapping as early as possible (no-op off Android)
+            org.vivecraft.client_vr.provider.openxr.BinderWatch.start();
             ClientPlayNetworking.registerGlobalReceiver(VivecraftPayloadS2C.TYPE,
                 (payload, context) -> ClientNetworking.handlePacket(payload));
             ClientEvents.registerClientCommands();
