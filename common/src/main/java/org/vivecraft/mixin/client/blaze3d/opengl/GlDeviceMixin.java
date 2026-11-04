@@ -8,7 +8,9 @@ import org.lwjgl.opengl.GL;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL13C;
 import org.lwjgl.opengl.GL30C;
-import org.lwjgl.opengl.GL42C;
+import org.lwjgl.system.FunctionProvider;
+import org.lwjgl.system.JNI;
+import org.lwjgl.system.Library;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
@@ -64,8 +66,9 @@ public class GlDeviceMixin implements GlDeviceExtension {
         // wrap glTexStorage2D, which allocates all faces at once and is core in OpenGL ES 3.0
         boolean allocated = false;
         try {
-            if (GL.getCapabilities().glTexStorage2D != 0L) {
-                GL42C.glTexStorage2D(GL13C.GL_TEXTURE_CUBE_MAP, mipLevels, GlConst.toGlInternalId(format), width, height);
+            long texStorage2D = vivecraft$findTexStorage2D();
+            if (texStorage2D != 0L) {
+                JNI.invokeV(GL13C.GL_TEXTURE_CUBE_MAP, mipLevels, GlConst.toGlInternalId(format), width, height, texStorage2D);
                 int error = GlStateManager._getError();
                 if (error == 0) {
                     allocated = true;
@@ -73,7 +76,7 @@ public class GlDeviceMixin implements GlDeviceExtension {
                     VRSettings.LOGGER.warn("QuestCraft: OpenGL error {} in glTexStorage2D while creating cube map '{}', falling back to glTexImage2D", error, label);
                 }
             } else {
-                VRSettings.LOGGER.warn("QuestCraft: glTexStorage2D not available, creating cube map '{}' with glTexImage2D", label);
+                VRSettings.LOGGER.warn("QuestCraft: glTexStorage2D not found, creating cube map '{}' with glTexImage2D", label);
             }
         } catch (Throwable t) {
             VRSettings.LOGGER.warn("QuestCraft: glTexStorage2D failed for cube map '{}', falling back to glTexImage2D", label, t);
@@ -92,6 +95,47 @@ public class GlDeviceMixin implements GlDeviceExtension {
         GlTexture texture = new GlTexture(usage, label, format, width, height, depthOrLayers, mipLevels, id);
         this.debugLabels.applyLabel(texture);
         cir.setReturnValue(texture);
+    }
+
+    @Unique
+    private static long vivecraft$texStorage2D = -1L;
+
+    /**
+     * LTW reports OpenGL 3.0, so LWJGL never loads glTexStorage2D (GL 4.2) into the capabilities, even though
+     * the Quest's OpenGL ES 3 driver has it. Look it up through LWJGL's provider first, then in the driver.
+     */
+    @Unique
+    private static long vivecraft$findTexStorage2D() {
+        if (vivecraft$texStorage2D != -1L) {
+            return vivecraft$texStorage2D;
+        }
+        long address = 0L;
+        String source = "none";
+        try {
+            address = GL.getCapabilities().glTexStorage2D;
+            source = "GL capabilities";
+        } catch (Throwable ignored) {}
+        if (address == 0L) {
+            try {
+                FunctionProvider provider = GL.getFunctionProvider();
+                if (provider != null) {
+                    address = provider.getFunctionAddress("glTexStorage2D");
+                    source = "GL function provider";
+                }
+            } catch (Throwable ignored) {}
+        }
+        if (address == 0L) {
+            try {
+                address = Library.loadNative("org.lwjgl.opengl", "/system/lib64/libGLESv3.so")
+                    .getFunctionAddress("glTexStorage2D");
+                source = "libGLESv3.so";
+            } catch (Throwable t) {
+                VRSettings.LOGGER.warn("QuestCraft: could not open libGLESv3.so", t);
+            }
+        }
+        VRSettings.LOGGER.info("QuestCraft: glTexStorage2D {}", address != 0L ? "found in " + source : "not found");
+        vivecraft$texStorage2D = address;
+        return address;
     }
 
     @Unique
