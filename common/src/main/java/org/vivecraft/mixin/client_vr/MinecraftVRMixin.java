@@ -254,7 +254,12 @@ public abstract class MinecraftVRMixin implements MinecraftExtension {
         if (VRState.VR_INITIALIZED) {
             if (ClientDataHolderVR.getInstance().menuWorldRenderer != null) {
                 ClientDataHolderVR.getInstance().menuWorldRenderer.checkTask();
-                if (ClientDataHolderVR.getInstance().menuWorldRenderer.isBuilding()) {
+                // QuestCraft: only build the menu world while no world is loaded. On Quest it kept building
+                // for over a minute after joining, competing with the integrated server for the CPU.
+                // Building picks up where it stopped when back in the menu.
+                if (ClientDataHolderVR.getInstance().menuWorldRenderer.isBuilding() &&
+                    Minecraft.getInstance().level == null)
+                {
                     Profiler.get().push("Build Menu World");
                     ClientDataHolderVR.getInstance().menuWorldRenderer.buildNext();
                     Profiler.get().pop();

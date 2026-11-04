@@ -713,6 +713,28 @@ public class MCOpenXR extends MCVR {
 
     private void sessionChanged(XrEventDataSessionStateChanged xrEventDataSessionStateChanged) {
         int state = xrEventDataSessionStateChanged.state();
+        VRSettings.LOGGER.info("QuestCraft: OpenXR session state {}", state);
+
+        // QuestCraft: the game lost focus (Meta menu open) or the session is stopping (quit from the Meta
+        // menu, headset off). On Quest the process is killed shortly after STOPPING, before EXITING arrives,
+        // so the world was never saved. Pausing a singleplayer world makes the integrated server save
+        // everything ("Saving and pausing game...").
+        if (state == XR10.XR_SESSION_STATE_VISIBLE || state == XR10.XR_SESSION_STATE_STOPPING) {
+            this.mc.execute(() -> {
+                if (this.mc.level == null) {
+                    return;
+                }
+                if (this.mc.screen == null) {
+                    VRSettings.LOGGER.info("QuestCraft: lost headset focus, pausing (singleplayer worlds save)");
+                    this.mc.pauseGame(false);
+                } else if (!this.mc.screen.isPauseScreen() && this.mc.getSingleplayerServer() != null) {
+                    // a screen like the inventory is open, so the game does not pause: save directly
+                    VRSettings.LOGGER.info("QuestCraft: lost headset focus, saving the world");
+                    var server = this.mc.getSingleplayerServer();
+                    server.execute(() -> server.saveEverything(false, false, false));
+                }
+            });
+        }
 
         switch (state) {
             case XR10.XR_SESSION_STATE_READY: {
